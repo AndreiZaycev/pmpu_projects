@@ -1,0 +1,11 @@
+# pytest
+.pytest_cache/
+__pycache__/
+.coverage
+htmlcov/
+.pytest_cache/
+*.pytest_cache
+
+crawled_messages.csv
+universities_mentions_crawler.session
+universities_posts_stats.csv

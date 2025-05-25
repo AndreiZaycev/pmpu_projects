@@ -1,0 +1,4 @@
+telethon==1.40.0
+matplotlib==3.10.3
+pandas==2.2.3
+pytest==8.3.5
