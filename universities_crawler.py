@@ -1,11 +1,28 @@
+import argparse
+import logging
+import pandas as pd
+import os
+import asyncio
+import typing as tp
+import telethon.types as ttp
+
 from telethon.sync import TelegramClient
 from telethon.tl.types import InputMessagesFilterEmpty, Channel
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from telethon.tl.functions.channels import GetFullChannelRequest
-import pandas as pd
-import os
-import asyncio
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('telegram_analyzer.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 
 __TERMS__ = {
     'спбгу': list(map(str.lower, ['spbgu', 'спбгу', 'спб гу', 'spbu', 'Санкт-Петербургский государственный университет'])),
@@ -13,7 +30,7 @@ __TERMS__ = {
 }
 
 class TelegramAnalyzer:
-    def __init__(self, client):
+    def __init__(self, client: TelegramClient):
         """
         Инициализация клиента Telegram
         :param client: Телеграм клиент
@@ -31,7 +48,7 @@ class TelegramAnalyzer:
         }
         self.data = []
     
-    async def search_messages(self, search_terms, limit=3000):
+    async def search_messages(self, search_terms: tp.Dict[str, tp.List[str]], limit: int = 3000):
         """
         Поиск сообщений по ключевым словам
         :param search_terms: Список терминов для поиска (например, ['СПбГУ', 'МГУ'])
@@ -40,6 +57,8 @@ class TelegramAnalyzer:
         
         await self.client.start()
         dialogs = []
+        logger.info("Начинаем поиск подходящих каналов...")
+
         async for dialog in self.client.iter_dialogs():
             if isinstance(dialog.entity, Channel):  # Только каналы c участниками больше 100
                 try:
@@ -49,12 +68,14 @@ class TelegramAnalyzer:
                     if participants_count is not None and participants_count > 100:
                         dialogs.append(dialog)
                 except Exception as e:
-                    print(f"Ошибка при обработке {dialog.name}: {str(e)}")
-        print(f'Найдено {len(dialogs)} чатов по которым будет производиться поиск')
+                    logger.error(f"Ошибка при обработке {dialog.name}: {str(e)}")
+
+        logger.info(f'Найдено {len(dialogs)} чатов по которым будет производиться поиск')
+
         for university in search_terms:
-            print(f'Ищем упоминания вуза {university}')
+            logger.info(f'Ищем упоминания вуза {university}')
             for term in search_terms[university]:
-                print(f"Поиск терма в сообщениях: {term}")
+                logger.info(f"Поиск терма в сообщениях: {term}")
                 for dialog in dialogs:
                     async for message in self.client.iter_messages(
                         dialog.entity,  # Все диалоги/channels
@@ -66,12 +87,12 @@ class TelegramAnalyzer:
                         await self.collect_message(message)
 
 
-    async def collect_message(self, message):
+    async def collect_message(self, message: ttp.Message):
         if hasattr(message, 'message'):
             self.data.append(message.message)
 
 
-    async def process_message(self, message, search_terms, found_by_term):
+    async def process_message(self, message: ttp.Message, search_terms: tp.Dict[str, tp.List[str]], found_by_term: str):
         """Обработка и анализ найденного сообщения"""
         self.stats['total_posts'] += 1
         
@@ -119,6 +140,7 @@ class TelegramAnalyzer:
 
         stats_df = pd.DataFrame(stats_df)
         stats_df.to_csv('universities_posts_stats.csv', header=True, index=None)
+        logger.info("Статистика сохранена в universities_posts_stats.csv")
         
         return stats_df
     
@@ -135,39 +157,75 @@ class TelegramAnalyzer:
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig('publications_count.png')
+        logger.info("График сохранен в publications_count.png")
         plt.show()
 
     def flush_crawled_data(self):
         df_data =pd.DataFrame({'message': self.data})
         df_data.to_csv('crawled_messages.csv', header=True, index=False)
+        logger.info("Собранные сообщения сохранены в crawled_messages.csv")
 
 
-async def main():
+def parse_args():
+    """Парсинг аргументов командной строки"""
+    parser = argparse.ArgumentParser(description='Анализатор упоминаний университетов в Telegram')
+    parser.add_argument('--api-id', default=None, help='Telegram API ID')
+    parser.add_argument('--api-hash', default=None, help='Telegram API Hash')
+    parser.add_argument('--limit', type=int, default=10000, help='Лимит сообщений для анализа (по умолчанию: 10000)')
+    parser.add_argument('--log-level', default='INFO', 
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        help='Уровень логирования (по умолчанию: INFO)')
     
-    API_ID = os.getenv('TELEGRAM_API_ID')
-    API_HASH = os.getenv('TELEGRAM_API_HASH')
+    return parser.parse_args()
+
+async def analyze_telegram(api_id: str, api_hash: str, limit: int):
+    """Основная функция для анализа Telegram"""
     client = TelegramClient(
-            'universities_mentions_crawler',
-            API_ID,
-            API_HASH,
-            device_model="Desktop",
-            system_version="Windows 10",
-            app_version="2.0",
-            lang_code="en",
-            system_lang_code="en-US"
-        )
-    analyzer = TelegramAnalyzer(client=client)
-    
-    await analyzer.search_messages(
-        search_terms=__TERMS__,
-        limit=10_000
+        'universities_mentions_crawler',
+        api_id,
+        api_hash,
+        device_model="Desktop",
+        system_version="Windows 10",
+        app_version="2.0",
+        lang_code="en",
+        system_lang_code="en-US"
     )
     
-    stats = analyzer.get_statistics()
-    print(stats)
+    analyzer = TelegramAnalyzer(client=client)
     
-    analyzer.plot_statistics()
-    analyzer.flush_crawled_data()
+    try:
+        await analyzer.search_messages(
+            search_terms=__TERMS__,
+            limit=limit
+        )
+        
+        stats = analyzer.get_statistics()
+        logger.info("\n" + stats.to_string())
+        
+        analyzer.plot_statistics()
+        analyzer.flush_crawled_data()
+    except Exception as e:
+        logger.error(f"Произошла ошибка: {str(e)}", exc_info=True)
+    finally:
+        await client.disconnect()
+
+def main():
+    args = parse_args()
+    
+    API_ID = args.api_id if args.api_id else os.getenv('TELEGRAM_API_ID')
+    API_HASH = args.api_hash if args.api_hash else os.getenv('TELEGRAM_API_HASH')
+
+    logger.setLevel(args.log_level)
+    for handler in logger.handlers:
+        handler.setLevel(args.log_level)
+    
+    logger.info("Запуск анализатора Telegram...")
+    
+    asyncio.run(analyze_telegram(
+        api_id=API_ID,
+        api_hash=API_HASH,
+        limit=args.limit
+    ))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

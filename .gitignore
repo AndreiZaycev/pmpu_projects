@@ -9,3 +9,5 @@ htmlcov/
 crawled_messages.csv
 universities_mentions_crawler.session
 universities_posts_stats.csv
+publications_count.png
+*.log
