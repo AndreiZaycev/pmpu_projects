@@ -13,6 +13,12 @@ pip install -r requirements.txt
 ```
 python universities_crawler.py
 ```
+Если нужно закастомить ввод, воспользуйтесь 
+```
+python universities_crawler.py -h
+```
+и ознакомьтесь с документацией к cli  
+
 Предварительно перед запуском вам нужно получить access_tokens для телеграма на сайте https://my.telegram.org/auth и прокинуть в переменные окружения
 ``` 
 TELEGRAM_API_ID
