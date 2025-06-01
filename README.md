@@ -13,11 +13,19 @@ pip install -r requirements.txt
 ```
 python universities_crawler.py
 ```
-Если нужно закастомить ввод, воспользуйтесь 
+Параметры cli
 ```
-python universities_crawler.py -h
+options:
+  -h, --help            show this help message and exit
+  --api-id API_ID       Telegram API ID
+  --api-hash API_HASH   Telegram API Hash
+  --limit LIMIT         Лимит сообщений для анализа (по умолчанию: 10000)
+  --min-participants-count MIN_PARTICIPANTS_COUNT
+                        Минимальное кол-во подписчиков для парсинга канала
+  --log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}
+                        Уровень логирования (по умолчанию: INFO)
 ```
-и ознакомьтесь с документацией к cli  
+
 
 Предварительно перед запуском вам нужно получить access_tokens для телеграма на сайте https://my.telegram.org/auth и прокинуть в переменные окружения
 ``` 

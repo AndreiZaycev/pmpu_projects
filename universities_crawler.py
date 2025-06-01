@@ -11,7 +11,11 @@ from telethon.tl.types import InputMessagesFilterEmpty, Channel
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from telethon.tl.functions.channels import GetFullChannelRequest
-
+from telethon.errors import (
+    ChannelPrivateError,
+    ChannelInvalidError,
+    FloodWaitError
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 __TERMS__ = {
-    'спбгу': list(map(str.lower, ['spbgu', 'спбгу', 'спб гу', 'spbu', 'Санкт-Петербургский государственный университет'])),
-    'мгу': list(map(str.lower, ['msu', 'мгу', 'Московский государственный университет']))
+    'спбгу': ('spbgu', 'спбгу', 'спб гу', 'spbu', 'cанкт-петербургский государственный университет'),
+    'мгу': ('msu', 'мгу', 'московский государственный университет')
 }
 
 class TelegramAnalyzer:
@@ -48,7 +52,7 @@ class TelegramAnalyzer:
         }
         self.data = []
     
-    async def search_messages(self, search_terms: tp.Dict[str, tp.List[str]], limit: int = 3000):
+    async def search_messages(self, search_terms: tp.Dict[str, tp.List[str]], limit: int = 3000, min_participants_count=100):
         """
         Поиск сообщений по ключевым словам
         :param search_terms: Список терминов для поиска (например, ['СПбГУ', 'МГУ'])
@@ -60,15 +64,26 @@ class TelegramAnalyzer:
         logger.info("Начинаем поиск подходящих каналов...")
 
         async for dialog in self.client.iter_dialogs():
-            if isinstance(dialog.entity, Channel):  # Только каналы c участниками больше 100
+            if isinstance(dialog.entity, Channel):  # Только каналы c участниками больше min_participants_count
                 try:
                     channel_connect  = await self.client.get_entity(dialog.entity)
                     channel_full_info = await self.client(GetFullChannelRequest(channel=channel_connect))
                     participants_count = channel_full_info.full_chat.participants_count
-                    if participants_count is not None and participants_count > 100:
+                    if participants_count is not None and participants_count > min_participants_count:
                         dialogs.append(dialog)
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке {dialog.name}: {str(e)}")
+                except ValueError as e:
+                    logger.error(f"Ошибка при получении entity для {dialog.name}: {str(e)}")
+                except ChannelPrivateError:
+                    logger.error(f"Канал {dialog.name} является приватным или недоступен")
+                except ChannelInvalidError:
+                    logger.error(f"Некорректный ID канала для {dialog.name}")
+                except FloodWaitError as e:
+                    logger.error(f"Необходимо подождать {e.seconds} секунд перед следующим запросом")
+                    await asyncio.sleep(e.seconds)
+                except (ConnectionError, TimeoutError) as e:
+                    logger.error(f"Сетевая ошибка при обработке канала {dialog.name}: {str(e)}")
+                    await asyncio.sleep(5)
+                
 
         logger.info(f'Найдено {len(dialogs)} чатов по которым будет производиться поиск')
 
@@ -172,13 +187,14 @@ def parse_args():
     parser.add_argument('--api-id', default=None, help='Telegram API ID')
     parser.add_argument('--api-hash', default=None, help='Telegram API Hash')
     parser.add_argument('--limit', type=int, default=10000, help='Лимит сообщений для анализа (по умолчанию: 10000)')
+    parser.add_argument('--min-participants-count', type=int, default=100, help='Минимальное кол-во подписчиков для парсинга канала')
     parser.add_argument('--log-level', default='INFO', 
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Уровень логирования (по умолчанию: INFO)')
     
     return parser.parse_args()
 
-async def analyze_telegram(api_id: str, api_hash: str, limit: int):
+async def analyze_telegram(api_id: str, api_hash: str, limit: int, min_participants_count=100):
     """Основная функция для анализа Telegram"""
     client = TelegramClient(
         'universities_mentions_crawler',
@@ -192,22 +208,18 @@ async def analyze_telegram(api_id: str, api_hash: str, limit: int):
     )
     
     analyzer = TelegramAnalyzer(client=client)
+
+    await analyzer.search_messages(
+        search_terms=__TERMS__,
+        limit=limit,
+        min_participants_count=min_participants_count
+    )
     
-    try:
-        await analyzer.search_messages(
-            search_terms=__TERMS__,
-            limit=limit
-        )
-        
-        stats = analyzer.get_statistics()
-        logger.info("\n" + stats.to_string())
-        
-        analyzer.plot_statistics()
-        analyzer.flush_crawled_data()
-    except Exception as e:
-        logger.error(f"Произошла ошибка: {str(e)}", exc_info=True)
-    finally:
-        await client.disconnect()
+    stats = analyzer.get_statistics()
+    logger.info("\n" + stats.to_string())
+    
+    analyzer.plot_statistics()
+    analyzer.flush_crawled_data()
 
 def main():
     args = parse_args()
@@ -224,7 +236,8 @@ def main():
     asyncio.run(analyze_telegram(
         api_id=API_ID,
         api_hash=API_HASH,
-        limit=args.limit
+        limit=args.limit,
+        min_participants_count=args.min_participants_count
     ))
 
 if __name__ == "__main__":
